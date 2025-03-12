@@ -1,3 +1,11 @@
+//
+//  User.swift
+//  PushNotificationBackend
+//
+//  Created by Alex Baur on 3/12/25.
+//
+
+
 import Fluent
 import Vapor
 
