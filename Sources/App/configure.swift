@@ -2,9 +2,11 @@ import NIOSSL
 import Fluent
 import FluentPostgresDriver
 import Vapor
+import APNS
+import JWTKit
 
 public func configure(_ app: Application) throws {
-    // Configure your PostgreSQL database:
+    // MARK: - Database Configuration
     if let databaseURL = Environment.get("DATABASE_URL"), var postgresConfig = PostgresConfiguration(url: databaseURL) {
         // For Heroku or other environments that require TLS:
         postgresConfig.tlsConfiguration = .makeClientConfiguration()
@@ -12,22 +14,61 @@ public func configure(_ app: Application) throws {
     } else {
         // Local database configuration
         app.databases.use(.postgres(
-            hostname: Environment.get("DATABASE_HOST") ?? "localhost",
-            port: Environment.get("DATABASE_PORT").flatMap(Int.init(_:)) ?? PostgresConfiguration.ianaPortNumber,
-            username: Environment.get("DATABASE_USERNAME") ?? "myorthocompanion",
-            password: Environment.get("DATABASE_PASSWORD") ?? "Becca123$",
-            database: Environment.get("DATABASE_NAME") ?? "MyorthocompanionTKAdatabase"
+            hostname: "localhost",
+            port: 5432,
+            username: "myorthocompanion",
+            password: "Becca123$",
+            database: "MyorthocompanionTKAdatabase"
         ), as: .psql)
+
     }
+    
     print("DATABASE_HOST:", Environment.get("DATABASE_HOST") ?? "not set")
     print("DATABASE_PORT:", Environment.get("DATABASE_PORT") ?? "not set")
     print("DATABASE_USERNAME:", Environment.get("DATABASE_USERNAME") ?? "not set")
     print("DATABASE_PASSWORD:", Environment.get("DATABASE_PASSWORD") ?? "not set")
     print("DATABASE_NAME:", Environment.get("DATABASE_NAME") ?? "not set")
 
-    // Register migrations (we'll add a sample migration below)
+    // MARK: - Migrations
     app.migrations.add(CreateDeviceRegistration())
 
-    // Other configurations...
+    // MARK: - APNs Configuration
+    do {
+        // Use environment variables for secret configuration
+        // or replace these with hard-coded values for local testing.
+        let keyPath = Environment.get("APNS_KEY_PATH")
+            ?? "/Users/alexbaur/Xcode/MyOrtho Companion TKA Database/AuthKey_D68DGZ8TBA.p8"
+        let keyContents = try String(contentsOfFile: keyPath, encoding: .utf8)
+        
+        let keyId = Environment.get("APNS_KEY_ID") ?? "D68DGZ8TBA"
+        let teamId = Environment.get("APNS_TEAM_ID") ?? "MLMGMULY2P"
+        let topic = Environment.get("APNS_TOPIC")
+            ?? "com.alexbaur.MyOrtho-Companion--Knee-Replacement"
+        
+        // Create APNs configuration using the JWT authentication method.
+        // Note how we convert 'keyId' to 'JWKIdentifier'.
+        let apnsConfig = try APNSwiftConfiguration(
+            authenticationMethod: .jwt(
+                key: .private(pem: keyContents),
+                keyIdentifier: JWKIdentifier(string: keyId),
+                teamIdentifier: teamId
+            ),
+            topic: topic,
+            environment: .sandbox // Switch to .production when you're ready for production.
+        )
+        
+        // Store the APNs configuration for use throughout your app
+        app.storage[APNSConfigurationKey.self] = apnsConfig
+        app.logger.info("APNs configuration loaded successfully.")
+    } catch {
+        app.logger.error("Failed to configure APNs: \(error.localizedDescription)")
+    }
+    
+    // MARK: - Other Configurations & Routes
     try routes(app)
+}
+
+// Define a StorageKey for holding the APNs configuration in the application's storage.
+struct APNSConfigurationKey: StorageKey {
+    typealias Value = APNSwiftConfiguration
 }
