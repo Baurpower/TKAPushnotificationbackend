@@ -6,7 +6,7 @@ import APNS
 
 /// A simple payload structure conforming to `APNSwiftNotification`.
 /// It must have an `aps` property of type `APNSwiftPayload` and implement
-/// the optional APNs properties (apnsID, expiration, etc.).
+/// the optional APNs properties.
 struct SimplePushPayload: APNSwiftNotification {
     // The standard APNs payload from APNSwift, which includes alert, badge, etc.
     let aps: APNSwiftPayload
@@ -41,7 +41,7 @@ func sendPushNotificationHandler(_ req: Request) async throws -> HTTPStatus {
     )
     
     // Build the APNSwiftPayload (includes alert, badge, sound, etc.).
-    // APNSwiftSoundType is an enum. For a normal sound, use .normal("default").
+    // For a normal sound, use .normal("default").
     let apnsPayload = APNSwiftPayload(
         alert: alert,
         badge: 1,
@@ -58,20 +58,39 @@ func sendPushNotificationHandler(_ req: Request) async throws -> HTTPStatus {
     return .ok
 }
 
+// Dummy implementation for testing inactive notifications.
+// In your real implementation, this function should:
+//   1. Query the database for devices that haven't been opened in 3 days.
+//   2. Loop through those devices and send each one a push notification.
+func checkAndSendInactiveUserNotifications(app: Application) async throws {
+    // For now, simply log that this function was called.
+    app.logger.info("Simulating sending notifications to inactive users.")
+}
+
+// Temporary route for testing inactive notifications immediately.
+func testInactiveNotificationsHandler(_ req: Request) async throws -> HTTPStatus {
+    try await checkAndSendInactiveUserNotifications(app: req.application)
+    return .ok
+}
+
 // MARK: - Application Routes
 
 func routes(_ app: Application) throws {
-    // Create a new device registration
+    // Create a new device registration.
+    // Assumes you have defined the DeviceRegistration model elsewhere.
     app.post("register") { req -> EventLoopFuture<DeviceRegistration> in
         let deviceReg = try req.content.decode(DeviceRegistration.self)
         return deviceReg.create(on: req.db).map { deviceReg }
     }
-
-    // Fetch all device registrations
+    
+    // Fetch all device registrations.
     app.get("registrations") { req -> EventLoopFuture<[DeviceRegistration]> in
         DeviceRegistration.query(on: req.db).all()
     }
     
     // Route to test push notifications.
     app.get("testPush", use: sendPushNotificationHandler)
+    
+    // Temporary route for testing inactive notifications.
+    app.get("testInactiveNotifications", use: testInactiveNotificationsHandler)
 }

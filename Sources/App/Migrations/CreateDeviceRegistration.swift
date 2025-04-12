@@ -1,24 +1,17 @@
-//
-//  CreateDeviceRegistration.swift
-//  PushNotificationBackend
-//
-//  Created by Alex Baur on 3/12/25.
-//
-
-
 import Fluent
 
 struct CreateDeviceRegistration: Migration {
     func prepare(on database: Database) -> EventLoopFuture<Void> {
         database.schema("device_registrations")
             .id()
-            .field("user_id", .string, .required)
             .field("device_token", .string, .required)
-            .field("latitude", .double)
-            .field("longitude", .double)
+            .field("user_id", .uuid)
+            .field("last_opened_at", .datetime)
+            .field("created_at", .datetime)
+            .field("updated_at", .datetime)
             .create()
     }
-
+    
     func revert(on database: Database) -> EventLoopFuture<Void> {
         database.schema("device_registrations").delete()
     }
