@@ -9,32 +9,29 @@ public func configure(_ app: Application) throws {
     app.http.server.configuration.hostname = "0.0.0.0"
     app.http.server.configuration.port = 8080
 
-    // MARK: - TLS Configuration with RDS Certificate
+    // ✅ Correct TLS config using the RDS PEM bundle
     let certPath = "/home/ubuntu/TKAPushnotificationbackend/global-bundle.pem"
-    let tlsConfig = try! NIOSSLSocketTLSConfiguration.forClient(
-        certificateVerification: .fullVerification,
-        trustRoots: .file(certPath)
+    let tlsConfig = try TLSConfiguration.makeClientConfiguration()
+    tlsConfig.certificateVerification = .fullVerification
+    tlsConfig.trustRoots = .file(certPath)
+
+    let postgresConfig = PostgresConfiguration(
+        hostname: "myorthocompanionknee-db.ct8ays8wi7r9.us-east-2.rds.amazonaws.com",
+        port: 5432,
+        username: "postgres",
+        password: "Myortho2025$",
+        database: "myorthocompanionknee",
+        tlsConfiguration: tlsConfig
     )
 
-    // MARK: - Database Configuration (RDS Only)
-    app.databases.use(.postgres(
-        configuration: PostgresConfiguration(
-            hostname: "myorthocompanionknee-db.ct8ays8wi7r9.us-east-2.rds.amazonaws.com",
-            port: 5432,
-            username: "postgres",
-            password: "Myortho2025$",
-            database: "myorthocompanionknee",
-            tlsConfiguration: tlsConfig
-        )
-    ), as: .psql)
+    app.databases.use(.postgres(configuration: postgresConfig), as: .psql)
+    app.logger.info("✅ Connected to database with TLS verification")
 
-    print("✅ Connected to database with TLS verification")
-
-    // MARK: - Migrations
+    // Migrations
     app.migrations.add(CreateDeviceRegistration())
     try app.autoMigrate().wait()
 
-    // MARK: - APNs Configuration
+    // APNs setup (unchanged)
     do {
         let keyPath = Environment.get("APNS_KEY_PATH") ?? "/Users/alexbaur/Xcode/MyOrtho Companion TKA Database/AuthKey_D68DGZ8TBA.p8"
         let keyContents = try String(contentsOfFile: keyPath, encoding: .utf8)
