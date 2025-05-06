@@ -11,9 +11,10 @@ public func configure(_ app: Application) throws {
 
     // ✅ Correct TLS config using the RDS PEM bundle
     let certPath = "/home/ubuntu/TKAPushnotificationbackend/global-bundle.pem"
-    let tlsConfig = try TLSConfiguration.makeClientConfiguration()
+    var tlsConfig = TLSConfiguration.makeClientConfiguration()
     tlsConfig.certificateVerification = .fullVerification
     tlsConfig.trustRoots = .file(certPath)
+
 
     let postgresConfig = PostgresConfiguration(
         hostname: "myorthocompanionknee-db.ct8ays8wi7r9.us-east-2.rds.amazonaws.com",
