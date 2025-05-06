@@ -9,27 +9,26 @@ public func configure(_ app: Application) throws {
     app.http.server.configuration.hostname = "0.0.0.0"
     app.http.server.configuration.port = 8080
 
-    // MARK: - Database Configuration
-    guard let host = Environment.get("DATABASE_HOST"),
-          let portString = Environment.get("DATABASE_PORT"), let port = Int(portString),
-          let username = Environment.get("DATABASE_USERNAME"),
-          let password = Environment.get("DATABASE_PASSWORD"),
-          let dbname = Environment.get("DATABASE_NAME") else {
-        fatalError("❌ Missing one or more required database environment variables.")
-    }
-
-    let postgresConfig = PostgresConfiguration(
-        hostname: host,
-        port: port,
-        username: username,
-        password: password,
-        database: dbname,
-        tlsConfiguration: .makeClientConfiguration()
+    // MARK: - TLS Configuration with RDS Certificate
+    let certPath = "/home/ubuntu/TKAPushnotificationbackend/global-bundle.pem"
+    let tlsConfig = try! NIOSSLSocketTLSConfiguration.forClient(
+        certificateVerification: .fullVerification,
+        trustRoots: .file(certPath)
     )
 
-    app.databases.use(.postgres(configuration: postgresConfig), as: .psql)
+    // MARK: - Database Configuration (RDS Only)
+    app.databases.use(.postgres(
+        configuration: PostgresConfiguration(
+            hostname: "myorthocompanionknee-db.ct8ays8wi7r9.us-east-2.rds.amazonaws.com",
+            port: 5432,
+            username: "postgres",
+            password: "Myortho2025$",
+            database: "myorthocompanionknee",
+            tlsConfiguration: tlsConfig
+        )
+    ), as: .psql)
 
-    app.logger.info("✅ Connected to database: \(dbname) at \(host):\(port)")
+    print("✅ Connected to database with TLS verification")
 
     // MARK: - Migrations
     app.migrations.add(CreateDeviceRegistration())
@@ -55,31 +54,28 @@ public func configure(_ app: Application) throws {
         )
 
         app.storage[APNSConfigurationKey.self] = apnsConfig
-        app.logger.info("✅ APNs configuration loaded successfully.")
+        app.logger.info("APNs configuration loaded successfully.")
     } catch {
-        app.logger.error("❌ Failed to configure APNs: \(error.localizedDescription)")
+        app.logger.error("Failed to configure APNs: \(error.localizedDescription)")
     }
 
-    // MARK: - Routes & Scheduled Tasks
     try routes(app)
     scheduleInactiveUserNotifications(app: app)
 }
 
-// MARK: - Storage Key for APNs
 struct APNSConfigurationKey: StorageKey {
     typealias Value = APNSwiftConfiguration
 }
 
-// MARK: - Scheduled Notification Task
 func scheduleInactiveUserNotifications(app: Application) {
     app.eventLoopGroup.next().scheduleRepeatedTask(initialDelay: .seconds(10), delay: .hours(24)) { task in
         Task {
             do {
                 try await checkAndSendInactiveUserNotifications(app: app)
             } catch {
-                app.logger.error("❌ Error during inactive notification check: \(error)")
+                app.logger.error("Error during inactive notification check: \(error)")
             }
         }
     }
-    app.logger.info("📆 Scheduled inactive user notification check.")
+    app.logger.info("Scheduled inactive user notification check.")
 }
