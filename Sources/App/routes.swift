@@ -2,16 +2,10 @@ import Fluent
 import Vapor
 import APNS
 
-// MARK: - Push Notification Payloads
+// MARK: - Push Payload
 
-/// A simple payload structure conforming to `APNSwiftNotification`.
-/// It must have an `aps` property of type `APNSwiftPayload` and implement
-/// the optional APNs properties.
 struct SimplePushPayload: APNSwiftNotification {
-    // The standard APNs payload from APNSwift, which includes alert, badge, etc.
     let aps: APNSwiftPayload
-    
-    // Optional properties you can customize as needed.
     var apnsID: UUID? = nil
     var expiration: Date? = nil
     var priority: Int? = nil
@@ -19,78 +13,127 @@ struct SimplePushPayload: APNSwiftNotification {
     var collapseIdentifier: String? = nil
 }
 
-// MARK: - Route Handler for Sending Push Notifications
+// MARK: - Registration Input Structure
 
-func sendPushNotificationHandler(_ req: Request) async throws -> HTTPStatus {
-    // Retrieve the APNs configuration stored in your app's storage.
-    guard let apnsConfig = req.application.storage[APNSConfigurationKey.self] else {
-        throw Abort(.internalServerError, reason: "APNs configuration is missing")
-    }
-    
-    // Create an APNs client using the configuration.
-    let apnsClient = try await APNSwiftConnection.connect(configuration: apnsConfig, on: req.eventLoop).get()
-    
-    // Replace this with a valid device token from your iOS app.
-    let deviceToken = "493ad5a91ee24b109b6b96a178623d1144eac778c6e7e3eec5cbb07da4e3ef6c"
-    
-    // Build an alert to display to the user.
-    let alert = APNSwiftAlert(
-        title: nil,
-        subtitle: nil,
-        body: "Hello from Vapor!"
-    )
-    
-    // Build the APNSwiftPayload (includes alert, badge, sound, etc.).
-    // For a normal sound, use .normal("default").
-    let apnsPayload = APNSwiftPayload(
-        alert: alert,
-        badge: 1,
-        sound: .normal("default")
-    )
-    
-    // Create our overall push notification payload.
-    let payload = SimplePushPayload(aps: apnsPayload)
-    
-    // Send the push notification to the specified device token.
-    try await apnsClient.send(payload, to: deviceToken)
-    
-    // Return a success status code.
-    return .ok
+struct RegisterTokenInput: Content {
+    let token: String
+    let latitude: Double?
+    let longitude: Double?
 }
 
-// Dummy implementation for testing inactive notifications.
-// In your real implementation, this function should:
-//   1. Query the database for devices that haven't been opened in 3 days.
-//   2. Loop through those devices and send each one a push notification.
-func checkAndSendInactiveUserNotifications(app: Application) async throws {
-    // For now, simply log that this function was called.
-    app.logger.info("Simulating sending notifications to inactive users.")
-}
-
-// Temporary route for testing inactive notifications immediately.
-func testInactiveNotificationsHandler(_ req: Request) async throws -> HTTPStatus {
-    try await checkAndSendInactiveUserNotifications(app: req.application)
-    return .ok
-}
-
-// MARK: - Application Routes
+// MARK: - Routes
 
 func routes(_ app: Application) throws {
-    // Create a new device registration.
-    // Assumes you have defined the DeviceRegistration model elsewhere.
-    app.post("register") { req -> EventLoopFuture<DeviceRegistration> in
-        let deviceReg = try req.content.decode(DeviceRegistration.self)
-        return deviceReg.create(on: req.db).map { deviceReg }
-    }
     
-    // Fetch all device registrations.
+    // Register device token (used by iOS app)
+    app.post("register-token") { req -> EventLoopFuture<HTTPStatus> in
+        let input = try req.content.decode(RegisterTokenInput.self)
+
+        // 🚨 Clean the token before using it
+        let cleanToken = input.token.trimmingCharacters(in: .whitespacesAndNewlines)
+
+        return DeviceRegistration.query(on: req.db)
+            .filter(\.$deviceToken == cleanToken)
+            .first()
+            .flatMap { existing in
+                if let existing = existing {
+                    existing.lastOpenedAt = Date()
+                    return existing.save(on: req.db).transform(to: .ok)
+                } else {
+                    let new = DeviceRegistration(deviceToken: cleanToken, lastOpenedAt: Date())
+                    return new.save(on: req.db).transform(to: .created)
+                }
+            }
+    }
+
+    
+    // Get all registered devices (for dev)
     app.get("registrations") { req -> EventLoopFuture<[DeviceRegistration]> in
         DeviceRegistration.query(on: req.db).all()
     }
     
-    // Route to test push notifications.
-    app.get("testPush", use: sendPushNotificationHandler)
-    
-    // Temporary route for testing inactive notifications.
-    app.get("testInactiveNotifications", use: testInactiveNotificationsHandler)
+    // Broadcast to ALL devices
+    app.post("notify-all") { req -> EventLoopFuture<String> in
+        guard let apnsConfig = req.application.storage[APNSConfigurationKey.self] else {
+            return req.eventLoop.makeFailedFuture(Abort(.internalServerError, reason: "Missing APNs config"))
+        }
+
+        return DeviceRegistration.query(on: req.db).all().flatMapEachCompact(on: req.eventLoop) { device in
+            guard !device.deviceToken.isEmpty else {
+                return req.eventLoop.makeSucceededFuture(nil)
+            }
+
+            let alert = APNSwiftAlert(
+                title: "📢 New SnapOrtho Beta Update!",
+                body: "Thanks for testing! Let us know your thoughts 🙏"
+            )
+
+            let payload = SimplePushPayload(
+                aps: APNSwiftPayload(
+                    alert: alert,
+                    badge: 1,
+                    sound: .normal("default")
+                )
+            )
+        
+
+            return APNSwiftConnection.connect(configuration: apnsConfig, on: req.eventLoop).flatMap { client in
+                client.send(payload, to: device.deviceToken)
+                    .map { "✅ Sent to \(device.deviceToken)" }
+                    .flatMapError { error in
+                        req.logger.error("❌ Failed to send to \(device.deviceToken): \(error)")
+                        return req.eventLoop.makeSucceededFuture("❌ Failed to send to \(device.deviceToken)")
+                    }
+            }
+        }
+        .map { $0.joined(separator: "\n") }
+    }
+    // ✅ Add this **inside** routes(_:)
+     app.delete("delete-fake-token") { req -> EventLoopFuture<HTTPStatus> in
+         DeviceRegistration.query(on: req.db)
+             .filter(\.$deviceToken == "your_device_token_here")
+             .delete()
+             .transform(to: .ok)
+     }
+ }
+
+
+func checkAndSendInactiveUserNotifications(app: Application) async throws {
+    app.logger.info("🔍 Checking for inactive users (placeholder logic)")
+
+    // Example logic: fetch devices not seen in 3+ days
+    let threeDaysAgo = Date().addingTimeInterval(-3 * 24 * 60 * 60)
+
+    let inactiveDevices = try await DeviceRegistration.query(on: app.db)
+        .filter(\.$lastOpenedAt < threeDaysAgo)
+        .all()
+
+    guard let apnsConfig = app.storage[APNSConfigurationKey.self] else {
+        throw Abort(.internalServerError, reason: "Missing APNs config")
+    }
+
+    for device in inactiveDevices {
+        guard !device.deviceToken.isEmpty else { continue }
+
+        let alert = APNSwiftAlert(
+            title: "👋 We miss you!",
+            body: "Haven’t seen you in a while. Come check out what’s new!"
+        )
+
+        let payload = SimplePushPayload(
+            aps: APNSwiftPayload(
+                alert: alert,
+                badge: 1,
+                sound: .normal("default")
+            )
+        )
+
+        do {
+            let client = try await APNSwiftConnection.connect(configuration: apnsConfig, on: app.eventLoopGroup.next()).get()
+            try await client.send(payload, to: device.deviceToken)
+            app.logger.info("✅ Sent re-engagement push to \(device.deviceToken)")
+        } catch {
+            app.logger.error("❌ Failed to send to \(device.deviceToken): \(error)")
+        }
+    }
 }

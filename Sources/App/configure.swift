@@ -6,6 +6,9 @@ import APNS
 import JWTKit
 
 public func configure(_ app: Application) throws {
+    app.http.server.configuration.hostname = "0.0.0.0"
+    app.http.server.configuration.port = 8080
+
     // MARK: - Database Configuration
     if let databaseURL = Environment.get("DATABASE_URL"), var postgresConfig = PostgresConfiguration(url: databaseURL) {
         // For Heroku or other environments that require TLS:
@@ -53,7 +56,7 @@ public func configure(_ app: Application) throws {
                 teamIdentifier: teamId
             ),
             topic: topic,
-            environment: .sandbox // Switch to .production when you're ready for production.
+            environment: .production // Switch to .production when you're ready for production.
         )
         
         // Store the APNs configuration for use throughout your app.
