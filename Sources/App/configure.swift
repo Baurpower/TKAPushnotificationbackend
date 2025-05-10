@@ -34,7 +34,8 @@ public func configure(_ app: Application) throws {
 
     // APNs setup (unchanged)
     do {
-        let keyPath = Environment.get("APNS_KEY_PATH") ?? "/Users/alexbaur/Xcode/MyOrtho Companion TKA Database/AuthKey_D68DGZ8TBA.p8"
+        let keyPath = Environment.get("APNS_KEY_PATH") ?? "/home/ubuntu/TKAPushnotificationbackend/AuthKey_D68DGZ8TBA.p8"
+
         let keyContents = try String(contentsOfFile: keyPath, encoding: .utf8)
 
         let keyId = Environment.get("APNS_KEY_ID") ?? "D68DGZ8TBA"

@@ -26,25 +26,33 @@ struct RegisterTokenInput: Content {
 func routes(_ app: Application) throws {
     
     // Register device token (used by iOS app)
-    app.post("register-token") { req -> EventLoopFuture<HTTPStatus> in
-        let input = try req.content.decode(RegisterTokenInput.self)
+    app.post("register") { req -> EventLoopFuture<HTTPStatus> in
+        do {
+            let input = try req.content.decode(RegisterTokenInput.self)
+            let cleanToken = input.token.trimmingCharacters(in: .whitespacesAndNewlines)
+            req.logger.info("📲 Incoming token: \(cleanToken)")
 
-        // 🚨 Clean the token before using it
-        let cleanToken = input.token.trimmingCharacters(in: .whitespacesAndNewlines)
-
-        return DeviceRegistration.query(on: req.db)
-            .filter(\.$deviceToken == cleanToken)
-            .first()
-            .flatMap { existing in
-                if let existing = existing {
-                    existing.lastOpenedAt = Date()
-                    return existing.save(on: req.db).transform(to: .ok)
-                } else {
-                    let new = DeviceRegistration(deviceToken: cleanToken, lastOpenedAt: Date())
-                    return new.save(on: req.db).transform(to: .created)
+            return DeviceRegistration.query(on: req.db)
+                .filter(\.$deviceToken == cleanToken)
+                .first()
+                .flatMap { existing in
+                    if let existing = existing {
+                        existing.lastOpenedAt = Date()
+                        req.logger.info("🔄 Token exists, updating timestamp")
+                        return existing.save(on: req.db).transform(to: .ok)
+                    } else {
+                        req.logger.info("🆕 New token, saving to DB")
+                        let new = DeviceRegistration(deviceToken: cleanToken, lastOpenedAt: Date())
+                        return new.save(on: req.db).transform(to: .created)
+                    }
                 }
-            }
+        } catch {
+            req.logger.error("❌ Failed to decode token: \(error)")
+            return req.eventLoop.makeSucceededFuture(.badRequest)
+        }
     }
+
+
 
     
     // Get all registered devices (for dev)
